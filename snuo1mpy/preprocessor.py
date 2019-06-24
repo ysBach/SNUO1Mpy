@@ -246,6 +246,9 @@ class Preprocessor():
             elif obj_raw.lower() in ["skyflat", "domeflat"]:
                 obj = obj_raw.lower()
 
+            elif imgtyp.lower() in ["flat", "flat field"]:
+                obj = "flat"
+
             else:
                 if obj_raw != str(hdr[KEYMAP["OBJECT"]]):
                     warn(str_obj.format(fpath.name,
@@ -309,7 +312,7 @@ class Preprocessor():
                                       verbose=verbose)
 
             newpaths.append(newpath)
-            if obj not in ["skyflat", "domeflat", "bias", "dark"]:
+            if obj not in ["flat", "skyflat", "domeflat", "bias", "dark"]:
                 objpaths.append(newpath)
 
         # Save list of file paths for future use.
