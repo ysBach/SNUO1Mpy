@@ -204,6 +204,14 @@ class Preprocessor():
         #   it is easier to change filename than FITS header.
 
         for fpath in self.rawpaths:
+            if fpath.name.startswith("CCD Image"):
+                # The image not taken correctly are saved as dummy name
+                # "CCD Image xxx.fit". It is user's fault to have this
+                # kind of image, so move it to useless.
+                print(str_useless.format(fpath.name, uselessdir))
+                fpath.rename(uselessdir / fpath.name)
+                continue
+
             try:
                 # Use `rsplit` because sometimes there are objnames like
                 # `sa101-100`, i.e., includes the hyphen.
@@ -469,7 +477,12 @@ class Preprocessor():
                 if self.bias_group_key:
                     corr_bias += tuple(dark_group[self.bias_group_key].iloc[0])
                 # else: empty. path is fully specified by _type_val.
-                biaspath = self.biaspaths[corr_bias]
+                try:
+                    biaspath = self.biaspaths[corr_bias]
+                except KeyError:
+                    biaspath = None
+                    warn(f"Bias not available for {corr_bias}. "
+                         + "Processing without bias.")
 
             mdark = yfu.bdf_process(mdark,
                                     mbiaspath=biaspath,
@@ -555,6 +568,12 @@ class Preprocessor():
                     corr_bias += tuple(flat_group[self.bias_group_key].iloc[0])
                 # else: empty. path is fully specified by _type_val.
                 biaspath = self.biaspaths[corr_bias]
+                try:
+                    biaspath = self.biaspaths[corr_bias]
+                except KeyError:
+                    biaspath = None
+                    warn(f"Bias not available for {corr_bias}. "
+                         + "Processing without bias.")
 
             # set path to master dark
             if mdarkpath is not None:
@@ -566,7 +585,12 @@ class Preprocessor():
                 if self.dark_group_key:
                     corr_dark += tuple(flat_group[self.dark_group_key].iloc[0])
                 # else: empty. path is fully specified by _type_val.
-                darkpath = self.darkpaths[corr_dark]
+                try:
+                    darkpath = self.darkpaths[corr_dark]
+                except (KeyError):
+                    darkpath = None
+                    warn(f"Dark not available for {corr_dark}. "
+                         + "Processing without dark.")
 
             # Do BD preproc before combine
             flat_bd_paths = []
