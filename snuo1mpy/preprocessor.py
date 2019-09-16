@@ -811,6 +811,9 @@ class Preprocessor():
                    + " --radius 0.2 -u app -L 0.30 -U 0.33"
                    + " --cpulimit 300 --no-plot --overwrite --no-remove-lines")
         if not Path(cfg).exists():
+            warn(f"astrometry config not found at {cfg} you specified.\n"
+                 + f"Making it at path {cfg} using "
+                 + f"the index directory ({indexdir}) you specified.")
             str_cfg = """
 # This is a config file for the Astrometry.net 'astrometry-engine'
 # program - it contains information about where indices are stored,
