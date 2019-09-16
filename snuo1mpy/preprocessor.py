@@ -1,11 +1,14 @@
-from warnings import warn
+import pickle
 from pathlib import Path
+from warnings import warn
+
+import pandas as pd
 from astropy.io import fits
 from astropy.io.fits import Card
-from astropy.time import Time
-import pandas as pd
 from astropy.nddata import CCDData
-import pickle
+from astropy.time import Time
+
+from .utils import KEYMAP, MEDCOMB_KEYS, USEFUL_KEYS, cards_gain_rdnoise
 
 try:
     import ysfitsutilpy as yfu
@@ -13,46 +16,49 @@ except ImportError:
     raise ImportError(
         "Please install ysfitsutilspy at: https://github.com/ysBach/ysfitsutilpy")
 
-from .utils import (MEDCOMB_KEYS, KEYMAP, USEFUL_KEYS, cards_gain_rdnoise)
 
 __all__ = ["Preprocessor"]
 
 
 class Preprocessor():
     def __init__(self, topdir, rawdir, instrument="STX16803",
-                 bias_type_key=["OBJECT"], bias_type_val=["bias"], bias_group_key=[],
-                 dark_type_key=["OBJECT"], dark_type_val=["dark"], dark_group_key=["EXPTIME"],
-                 flat_type_key=["OBJECT"], flat_type_val=["skyflat"], flat_group_key=["FILTER"],
+                 bias_type_key=["OBJECT"], bias_type_val=["bias"],
+                 bias_group_key=[],
+                 dark_type_key=["OBJECT"], dark_type_val=["dark"],
+                 dark_group_key=["EXPTIME"],
+                 flat_type_key=["OBJECT"], flat_type_val=["skyflat"],
+                 flat_group_key=["FILTER"],
                  summary_keywords=USEFUL_KEYS):
         """
         Parameters
         ----------
         topdir : path-like
-            The top directory of which all the other paths will be represented
-            relative to.
+            The top directory of which all the other paths will be
+            represented relative to.
 
         rawdir : path-like
-            The directory where all the FITS files are stored (without any
-            subdirectory)
+            The directory where all the FITS files are stored (without
+            any subdirectory)
 
         instrument : str
             The name of the instrument.
 
         xxxx_type_key : str or list of str, optional
-            The header keys to be used for the identification of the xxxx
-            frames (xxxx is one of bias, dark, flat). Each value should
-            correspond to the same-index element of ``type_val``. Usually
-            we use ``"OBJECT"`` or ``"IMAGETYP"``.
+            The header keys to be used for the identification of the
+            xxxx frames (xxxx is one of bias, dark, flat). Each value
+            should correspond to the same-index element of ``type_val``.
+            Usually we use ``"OBJECT"`` or ``"IMAGETYP"``.
 
         xxxx_type_val : str, float, int or list of such, optional
-            The header key and values to identify the xxxx frames (xxxx is
-            one of bias, dark, flat) frames. Each value should correspond to
-            the same-index element of ``type_key``.
+            The header key and values to identify the xxxx frames (xxxx
+            is one of bias, dark, flat) frames. Each value should
+            correspond to the same-index element of ``type_key``.
 
         xxxx_group_key : str or list str, optional
-            The header keywords to be used for grouping xxxx frames (xxxx is
-            one of bias, dark, flat). For dark frames, usual choice can be
-            ``['EXPTIME']``, and for flat frames, ``["FILTER"]``.
+            The header keywords to be used for grouping xxxx frames
+            (xxxx is one of bias, dark, flat). For dark frames, usual
+            choice can be ``['EXPTIME']``, and for flat frames,
+            ``["FILTER"]``.
 
         summary_keywords : list of str, optional
             The keywords of the header to be used for the summary table.
@@ -66,7 +72,8 @@ class Preprocessor():
         self.rawpaths.sort()
         self.summary_keywords = summary_keywords
         self.newpaths = None
-        self.summary = None
+        self.summary_raw = None
+        self.summary_red = None
         self.objpaths = None
         self.reducedpaths = None
         self.biaspaths = None
@@ -119,11 +126,19 @@ class Preprocessor():
     def initialize_self(self):
         ''' Initialization may convenient when process was halted amid.
         '''
-        if self.summary is None:
+        if self.summary_red is None:
             try:
-                self.summary = pd.read_csv(
+                self.summary_red = pd.read_csv(
+                    str(self.topdir / "summary_reduced.csv"))
+                self.reducedpaths = self.summary_red["file"].tolist()
+            except FileNotFoundError:
+                pass
+
+        if self.summary_raw is None:
+            try:
+                self.summary_raw = pd.read_csv(
                     str(self.topdir / "summary_raw.csv"))
-                self.newpaths = self.summary["file"].tolist()
+                self.newpaths = self.summary_raw["file"].tolist()
             except FileNotFoundError:
                 pass
 
@@ -171,22 +186,22 @@ class Preprocessor():
         Parameters
         ----------
         rename_by : list of str
-            The keywords in header to be used for the renaming of FITS files.
-            Each keyword values are connected by ``delimiter``.
+            The keywords in header to be used for the renaming of FITS
+            files. Each keyword values are connected by ``delimiter``.
 
         mkdir_by : list of str, optional
-            The keys which will be used to make subdirectories to classify
-            files. If given, subdirectories will be made with the header value
-            of the keys.
+            The keys which will be used to make subdirectories to
+            classify files. If given, subdirectories will be made with
+            the header value of the keys.
 
         delimiter : str, optional
             The delimiter for the renaming.
 
         archive_dir : path-like or None, optional
-            Where to move the original FITS file. If ``None``, the original file
-            will remain there. Deleting original FITS is dangerous so it is only
-            supported to move the files. You may delete files manually if
-            needed.
+            Where to move the original FITS file. If ``None``, the
+            original file will remain there. Deleting original FITS is
+            dangerous so it is only supported to move the files. You may
+            delete files manually if needed.
         '''
 
         newpaths = []
@@ -198,7 +213,7 @@ class Preprocessor():
         str_imgtyp = ("{:s}: IMAGETYP in header ({:s}) and that inferred from"
                       + "the filename ({:s}) doesn't seem to match.")
         str_useless = "{} is not a regular name. Moving to {}. "
-        str_obj = ("{:s}: OBJECT in header({:s}) != filename({:s})."
+        str_obj = ("{:s}: OBJECT in header({:s}) != filename({:s}). "
                    + "OBJECT in header is updated to match the filename.")
         # NOTE: it is better to give the filename a higher priority because
         #   it is easier to change filename than FITS header.
@@ -212,22 +227,35 @@ class Preprocessor():
                 fpath.rename(uselessdir / fpath.name)
                 continue
 
+            # else:
             try:
                 # Use `rsplit` because sometimes there are objnames like
                 # `sa101-100`, i.e., includes the hyphen.
                 # filt_or_bd : B/V/R/I/Ha/Sii/Oiii or bias/dkXX (XX=EXPTIME)
+                hdr = fits.getheader(fpath)
                 sp = fpath.name.rsplit('-')
+                if len(sp) == 1:
+                    sp = fpath.name.rsplit('_')
                 obj_raw = sp[0]
-                counter = sp[-1][:4]
-                filt_bd = sp[-1][4:]
+                counter = sp[-1].split('.')[0][:4]
+                filt_bd = sp[-1].split('.')[0][4:]
                 filt_bd_low = filt_bd.lower()
+                if obj_raw.lower() == 'cali':
+                    if filt_bd_low.startswith("b"):
+                        imgtyp = "bias"
+                    elif filt_bd_low.startswith("d"):
+                        imgtyp = "dark"
+                    else:
+                        print(str_useless.format(fpath.name, uselessdir))
+                        fpath.rename(uselessdir / fpath.name)
+                else:
+                    imgtyp = hdr["IMAGETYP"]
+                    
             except IndexError:
                 print(str_useless.format(fpath.name, uselessdir))
                 fpath.rename(uselessdir / fpath.name)
                 continue
 
-            hdr = fits.getheader(fpath)
-            imgtyp = hdr["IMAGETYP"]
             cards_to_add = []
 
             # Update header OBJECT cuz it is super messy...
@@ -288,7 +316,8 @@ class Preprocessor():
 
                 except KeyError:
                     if verbose:
-                        print(f"{fpath} failed in airmass calculation: KeyError")
+                        print(f"{fpath} failed in airmass calculation: "
+                              + "KeyError")
 
             datetime = Time(hdr[KEYMAP["DATE-OBS"]]).strftime("%Y%m%d-%H%M%S")
             obscam = f"SNUO_{self.instrument}"
@@ -334,11 +363,13 @@ class Preprocessor():
 
         self.newpaths = newpaths
         self.objpaths = objpaths
-        self.summary = yfu.make_summary(newpaths,
-                                        output=self.topdir / "summary_raw.csv",
-                                        keywords=self.summary_keywords,
-                                        pandas=True,
-                                        verbose=verbose)
+        self.summary_raw = yfu.make_summary(
+            newpaths,
+            output=self.topdir/"summary_raw.csv",
+            keywords=self.summary_keywords,
+            pandas=True,
+            verbose=verbose
+        )
 
     def make_bias(self, savedir=None, delimiter='-', dtype='float32',
                   comb_kwargs=MEDCOMB_KEYS):
@@ -367,18 +398,19 @@ class Preprocessor():
 
         yfu.mkdir(Path(savedir))
         biaspaths = {}
-        # For simplicity, crop the original data by type_key and type_val first.
-        st = self.summary.copy()
+        # For simplicity, crop the original data by type_key and
+        # type_val first.
+        st = self.summary_raw.copy()
         for k, v in zip(self.bias_type_key, self.bias_type_val):
             st = st[st[k] == v]
 
-        # For grouping, use _key (i.e., type_key + group_key). This is because
-        # (1) it is not harmful cuz type_key will have unique column values as
-        #   ``st`` has already been cropped in above for loop
-        # (2) by doing this we get more information from combining process
-        #   because, e.g., "images with ["OBJECT", "EXPTIME"] = ["dark", 1.0]
-        #   are loaded" will be printed rather than just "images with
-        #   ["EXPTIME"] = [1.0] are loaded".
+        # For grouping, use _key (i.e., type_key + group_key). This is
+        # because (1) it is not harmful cuz type_key will have unique
+        # column values as ``st`` has already been cropped in above for
+        # loop (2) by doing this we get more information from combining
+        # process because, e.g., "images with ["OBJECT", "EXPTIME"] =
+        # ["dark", 1.0] are loaded" will be printed rather than just
+        # "images with ["EXPTIME"] = [1.0] are loaded".
         gs = st.groupby(self.bias_key)
 
         # Do bias combine:
@@ -415,8 +447,9 @@ class Preprocessor():
             The directory where the frames will be saved.
 
         do_bias : bool, optional
-            If ``True``, subtracts bias from dark frames using self.biaspahts.
-            You can also specify ``mbiaspath`` to ignore that in ``self.``.
+            If ``True``, subtracts bias from dark frames using
+            self.biaspahts. You can also specify ``mbiaspath`` to ignore
+            that in ``self.``.
 
         mbiaspath : None, path-like, optional
             If you want to force a certain bias to be used, then you can
@@ -426,9 +459,9 @@ class Preprocessor():
             The delimiter for the renaming.
 
         dtype : str or numpy.dtype object, optional.
-            The data type you want for the final master bias frame. It is
-            recommended to use ``float32`` or ``int16`` if there is no
-            specific reason.
+            The data type you want for the final master bias frame. It
+            is recommended to use ``float32`` or ``int16`` if there is
+            no specific reason.
 
         comb_kwargs : dict or None, optional
             The parameters for ``combine_ccd``.
@@ -442,18 +475,19 @@ class Preprocessor():
         yfu.mkdir(Path(savedir))
         darkpaths = {}
 
-        # For simplicity, crop the original data by type_key and type_val first.
-        st = self.summary.copy()
+        # For simplicity, crop the original data by type_key and
+        # type_val first.
+        st = self.summary_raw.copy()
         for k, v in zip(self.dark_type_key, self.dark_type_val):
             st = st[st[k] == v]
 
-        # For grouping, use _key (i.e., type_key + group_key). This is because
-        # (1) it is not harmful cuz type_key will have unique column values as
-        #   ``st`` has already been cropped in above for loop
-        # (2) by doing this we get more information from combining process
-        #   because, e.g., "images with ["OBJECT", "EXPTIME"] = ["dark", 1.0]
-        #   are loaded" will be printed rather than just "images with
-        #   ["EXPTIME"] = [1.0] are loaded".
+        # For grouping, use _key (i.e., type_key + group_key). This is
+        # because (1) it is not harmful cuz type_key will have unique
+        # column values as ``st`` has already been cropped in above for
+        # loop (2) by doing this we get more information from combining
+        # process because, e.g., "images with ["OBJECT", "EXPTIME"] =
+        # ["dark", 1.0] are loaded" will be printed rather than just
+        # "images with ["EXPTIME"] = [1.0] are loaded".
         gs = st.groupby(self.dark_key)
 
         # Do dark combine:
@@ -516,13 +550,14 @@ class Preprocessor():
             The directory where the frames will be saved.
 
         do_bias, do_dark : bool, optional
-            If ``True``, subtracts bias and dark frames using ``self.biaspahts``
-            and ``self.darkpaths``. You can also specify ``mbiaspath`` and/or
-            ``mdarkpath`` to ignore those in ``self.``.
+            If ``True``, subtracts bias and dark frames using
+            ``self.biaspahts`` and ``self.darkpaths``. You can also
+            specify ``mbiaspath`` and/or ``mdarkpath`` to ignore those
+            in ``self.``.
 
         mbiaspath, mdarkpath : None, path-like, optional
-            If you want to force a certain bias or dark to be used, then you
-            can specify its path here.
+            If you want to force a certain bias or dark to be used, then
+            you can specify its path here.
 
         comb_kwargs: dict or None, optional
             The parameters for ``combine_ccd``.
@@ -531,9 +566,9 @@ class Preprocessor():
             The delimiter for the renaming.
 
         dtype : str or numpy.dtype object, optional.
-            The data type you want for the final master bias frame. It is
-            recommended to use ``float32`` or ``int16`` if there is no
-            specific reason.
+            The data type you want for the final master bias frame. It
+            is recommended to use ``float32`` or ``int16`` if there is
+            no specific reason.
         '''
         # Initial settings
         self.initialize_self()
@@ -544,17 +579,18 @@ class Preprocessor():
         yfu.mkdir(savedir)
         flatpaths = {}
 
-        # For simplicity, crop the original data by type_key and type_val first.
-        st = self.summary.copy()
+        # For simplicity, crop the original data by type_key and
+        # type_val first.
+        st = self.summary_raw.copy()
         for k, v in zip(self.flat_type_key, self.flat_type_val):
             st = st[st[k] == v]
 
-        # For grouping, use type_key + group_key.
-        # This is because (1) it is not harmful cuz type_key will have unique
-        # column values as ``st`` has already been cropped in above for loop
-        # (2) by doing this we get more information from combining process
-        # because, e.g., "images with ["OBJECT", "EXPTIME"] = ["dark", 1.0]
-        # are loaded" will be printed rather than just "images with
+        # For grouping, use type_key + group_key. This is because (1) it
+        # is not harmful cuz type_key will have unique column values as
+        # ``st`` has already been cropped in above for loop (2) by doing
+        # this we get more information from combining process because,
+        # e.g., "images with ["OBJECT", "EXPTIME"] = ["dark", 1.0] are
+        # loaded" will be printed rather than just "images with
         # ["EXPTIME"] = [1.0] are loaded".
         gs = st.groupby(self.flat_key)
 
@@ -640,6 +676,7 @@ class Preprocessor():
     def do_preproc(self, savedir=None, delimiter='-', dtype='float32',
                    mbiaspath=None, mdarkpath=None, mflatpath=None,
                    do_bias=True, do_dark=True, do_flat=True,
+                   do_crrej=False, crrej_kwargs=None, verbose_crrej=False,
                    verbose_bdf=True, verbose_summary=False):
         ''' Conduct the preprocessing using simplified ``bdf_process``.
         Parameters
@@ -659,6 +696,17 @@ class Preprocessor():
             If you want to force a certain bias, dark, or flat to be used,
             then you can specify its path here.
 
+        crrej_kwargs : dict or None, optional
+            If ``None`` (default), uses some default values defined in
+            ``~.misc.LACOSMIC_KEYS``. It is always discouraged to use
+            default except for quick validity-checking, because even the
+            official L.A. Cosmic codes in different versions (IRAF, IDL,
+            Python, etc) have different default parameters, i.e., there is
+            nothing which can be regarded as default.
+            To see all possible keywords, do
+            ``print(astroscrappy.detect_cosmics.__doc__)``
+            Also refer to
+            https://nbviewer.jupyter.org/github/ysbach/AO2019/blob/master/Notebooks/07-Cosmic_Ray_Rejection.ipynb
         '''
         # Initial settings
         self.initialize_self()
@@ -670,12 +718,13 @@ class Preprocessor():
         yfu.mkdir(savedir)
 
         savepaths = []
-        # for i, row in self.summary.iterrows():
+        # for i, row in self.summary_raw.iterrows():
         #     fpath = Path(row["file"])
         for fpath in self.objpaths:
             savepath = savedir / Path(fpath).name
             savepaths.append(savepath)
-            row = self.summary[self.summary["file"].values == str(fpath)]
+            row = self.summary_raw[self.summary_raw["file"].values == str(
+                fpath)]
 
             if mbiaspath is not None:
                 biaspath = mbiaspath
@@ -726,18 +775,55 @@ class Preprocessor():
                          + "Processing without flat.")
 
             objccd = CCDData.read(fpath)
-            _ = yfu.bdf_process(objccd,
-                                output=savepath,
-                                unit=None,
-                                mbiaspath=biaspath,
-                                mdarkpath=darkpath,
-                                mflatpath=flatpath,
+            _ = yfu.bdf_process(objccd,                       #
+                                output=savepath,              #
+                                unit=None,                    #
+                                mbiaspath=biaspath,           #
+                                mdarkpath=darkpath,           #
+                                mflatpath=flatpath,           #
+                                do_crrej=do_crrej,            #
+                                crrej_kwargs=crrej_kwargs,    #
+                                verbose_crrej=verbose_crrej,  #
                                 verbose_bdf=verbose_bdf)
 
         self.reducedpaths = savepaths
+        self.summary_red = yfu.make_summary(
+            self.reducedpaths,
+            output=self.topdir / "summary_reduced.csv",
+            pandas=True,
+            keywords=self.summary_keywords + ["PROCESS"],
+            verbose=verbose_summary
+        )
+        return self.summary_red
 
-        return yfu.make_summary(self.reducedpaths,
-                                output=self.topdir / "summary_reduced.csv",
-                                pandas=True,
-                                keywords=self.summary_keywords + ["PROCESS"],
-                                verbose=verbose_summary)
+    def make_astrometry_script(self, output=Path("astrometry.sh"),
+                               log=Path("astrometry.log")):
+        self.initialize_self()
+
+        str_time = (r'current_date_time="`date +%Y-%m-%d\ %H:%M:%S`";'
+                    + 'echo $current_date_time;')
+        str_mv = "mv {} {}/input.fits"
+        str_wcs = ("solve-field {}/input.fits -N {}"
+                   + " --sigma 5 --downsample 4"
+                   + " --radius 0.2 -u app -L 0.30 -U 0.33"
+                   + " --cpulimit 300 --no-plot --overwrite --no-remove-lines")
+
+        with open(Path(output), "w+") as astrometry:
+            astrometry.write(str_time)
+            astrometry.write("\n")
+            for fpath in self.summary_red["file"]:
+                fpath = Path(fpath)
+                fparent = fpath.parent
+                astrometry.write(str_mv.format(fpath, fparent))
+                astrometry.write("\n")
+                astrometry.write(str_wcs.format(fparent, fpath))
+                astrometry.write("\n")
+                astrometry.write(str_time)
+                astrometry.write("\n")
+            astrometry.write(f"rm {fparent}/input.*\n")
+            astrometry.write(str_time)
+
+        # import os
+        # import tqdm
+
+        # for fpath in tqdm(self.summary_red["file"]):
