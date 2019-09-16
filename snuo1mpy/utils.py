@@ -5,7 +5,7 @@ import os
 
 from astropy.io.fits import Card
 
-__all__ = ["MEDCOMB_KEYS", "GAIN_EPADU", "RDNOISE_E",
+__all__ = ["MEDCOMB_KEYS", "SITE_HORIZONS", "GAIN_EPADU", "RDNOISE_E",
            "KEYMAP", "USEFUL_KEYS",
            "cards_gain_rdnoise"]
 
@@ -14,6 +14,13 @@ MEDCOMB_KEYS = dict(overwrite=True,
                     combine_method="median",
                     reject_method=None,
                     combine_uncertainty_function=None)
+
+# The ``location``` for astroquery.jplhorizons
+# https://astroquery.readthedocs.io/en/latest/jplhorizons/jplhorizons.html
+#   longitude in degrees (East positive, West negative)
+#   latitude in degrees (North positive, South negative)
+#   elevation in km above the reference ellipsoid
+SITE_HORIZONS = dict(lon=126.95333, lat=37.45694, elevation=0.2)
 
 # Gain and rdnoise from SAO1-m package (@lim9gu)
 # https://github.com/lim9gu/SAO1-m/commit/bd8a931265bd611fb1f4152fdd802792aa702cce
