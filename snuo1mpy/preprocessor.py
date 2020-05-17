@@ -250,7 +250,7 @@ class Preprocessor():
                         fpath.rename(uselessdir / fpath.name)
                 else:
                     imgtyp = hdr["IMAGETYP"]
-                    
+
             except IndexError:
                 print(str_useless.format(fpath.name, uselessdir))
                 fpath.rename(uselessdir / fpath.name)
@@ -797,7 +797,7 @@ class Preprocessor():
         return self.summary_red
 
     def make_astrometry_script(self, output=Path("astrometry.sh"),
-                               log=Path("astrometry.log"), 
+                               log=Path("astrometry.log"),
                                indexdir=Path('.'), cfg=Path("astrometry.cfg")):
 
         # It just simply assumes 1-pixel binning (no binnig).
@@ -807,7 +807,7 @@ class Preprocessor():
                     + 'echo $current_date_time;')
         str_mv = "mv {} {}/input.fits"
         str_wcs = ("solve-field {}/input.fits -N {}"
-                   + " --sigma 5 --downsample 4"
+                   + " --nsigma 5 --downsample 4"
                    + " --radius 0.2 -u app -L 0.30 -U 0.33"
                    + " --cpulimit 300 --no-plot --overwrite --no-remove-lines")
         if not Path(cfg).exists():
@@ -826,7 +826,7 @@ class Preprocessor():
 #
 # -if you are using a 64-bit machine and you have enough physical memory to contain
 #  the indices you are using, then you want this enabled.
-# 
+#
 # -otherwise, leave it commented-out.
 
 inparallel
@@ -924,10 +924,10 @@ autoindex
 #index index-200-09
 #index index-200-10
 #index index-200-11
-""".format(indexdir.resolve())
+"""
 
             with open(Path(cfg), 'w+') as ff:
-                ff.write(str_cfg)
+                ff.write(str_cfg.format(str(indexdir.resolve())))
 
         with open(Path(output), "w+") as astrometry:
             astrometry.write(str_time)
